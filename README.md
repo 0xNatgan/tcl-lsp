@@ -13,6 +13,8 @@ Implemented features include:
 - Text Document References
 - Text Document definition
 
+
+
 Most of the implementation is based on hardcoded regex patterns to parse TCL code.
 
 # Usage
@@ -20,7 +22,7 @@ To run the server, you need to have TCL installed on your system. You can then r
 
 ```bash
 chmod +x ./tcl-lsp.tcl
-./tcl-lsp.tcl
+./tcl-lsp.tcl #use --tcp [port] or --stdio to specify the port or use stdin/stdout
 ```
 
 # installation
