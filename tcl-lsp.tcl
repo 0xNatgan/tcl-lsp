@@ -108,7 +108,7 @@ proc dict_to_json {dict_data} {
 }
 
 # Send LSP response
-proc send_response {id result} {
+proc send_response {id result {sock ""}} {
     # Handle different result types
     if {[llength $result] == 0} {
         # Empty result
@@ -137,15 +137,15 @@ proc send_response {id result} {
     }
     
     set response "\{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":$json_result\}"
-    send_lsp_message $response
+    send_lsp_message $response $sock
     debug_log "Sent response: $response"
 }
 
 # Send LSP error response
-proc send_error {id code message} {
+proc send_error {id code message {sock ""}} {
     set json_message [json::write string $message]
     set response "\{\"jsonrpc\":\"2.0\",\"id\":$id,\"error\":\{\"code\":$code,\"message\":$json_message\}\}"
-    send_lsp_message $response
+    send_lsp_message $response $sock
     debug_log "Sent error: $response"
 }
 
@@ -350,19 +350,19 @@ proc find_definition {content symbol_name} {
 }
 
 # Handle initialize request
-proc handle_initialize {params id} {
+proc handle_initialize {params id {sock ""}} {
     set result [dict create capabilities [dict create \
         textDocumentSync 1 \
         documentSymbolProvider true \
         referencesProvider true \
         definitionProvider true]]
-    send_response $id $result
+    send_response $id $result $sock
     debug_log "Initialized with capabilities"
 }
 
 # Handle shutdown request
-proc handle_shutdown {params id} {
-    send_response $id [dict create]
+proc handle_shutdown {params id {sock ""}} {
+    send_response $id [dict create] $sock
     debug_log "Shutdown requested"
 }
 
@@ -401,27 +401,27 @@ proc handle_did_change {params} {
 }
 
 # Handle textDocument/documentSymbol request
-proc handle_document_symbol {params id} {
+proc handle_document_symbol {params id {sock ""}} {
     global documents symbols
     set text_document [dict get $params textDocument]
     set uri [dict get $text_document uri]
     if {[info exists documents($uri)]} {
         set result $symbols($uri)
-        send_response $id $result
+        send_response $id $result $sock
     } else {
-        send_response $id [list]
+        send_response $id [list] $sock
     }
     debug_log "Document symbols requested for: $uri"
 }
 
 # Handle textDocument/references request
-proc handle_references {params id} {
+proc handle_references {params id {sock ""}} {
     global documents
     set text_document [dict get $params textDocument]
     set uri [dict get $text_document uri]
     set position [dict get $params position]
     if {![info exists documents($uri)]} {
-        send_response $id [list]
+        send_response $id [list] $sock
         return
     }
     set line [dict get $position line]
@@ -429,7 +429,7 @@ proc handle_references {params id} {
     set content $documents($uri)
     set word [get_word_at_position $content $line $character]
     if {$word eq ""} {
-        send_response $id [list]
+        send_response $id [list] $sock
         return
     }
     set references [find_references $content $word]
@@ -439,18 +439,18 @@ proc handle_references {params id} {
         dict set ref uri $uri
         lappend result $ref
     }
-    send_response $id $result
+    send_response $id $result $sock
     debug_log "References found for '$word': [llength $result]"
 }
 
 # Handle textDocument/definition request
-proc handle_definition {params id} {
+proc handle_definition {params id {sock ""}} {
     global documents
     set text_document [dict get $params textDocument]
     set uri [dict get $text_document uri]
     set position [dict get $params position]
     if {![info exists documents($uri)]} {
-        send_response $id [list]
+        send_response $id [list] $sock
         return
     }
     set line [dict get $position line]
@@ -458,7 +458,7 @@ proc handle_definition {params id} {
     set content $documents($uri)
     set word [get_word_at_position $content $line $character]
     if {$word eq ""} {
-        send_response $id [list]
+        send_response $id [list] $sock
         return
     }
     set definitions [find_definition $content $word]
@@ -468,7 +468,7 @@ proc handle_definition {params id} {
         dict set def uri $uri
         lappend result $def
     }
-    send_response $id $result
+    send_response $id $result $sock
     debug_log "Definition found for '$word': [llength $result]"
 }
 
@@ -514,19 +514,16 @@ proc handle_tcp_message {sock} {
 }
 
 # Main message handler
-proc handle_message {message} {
+proc handle_message {message {sock ""}} {
     if {[catch {set parsed [json::json2dict $message]} error]} {
         debug_log "JSON parse error: $error"
         return
     }
-    
     debug_log "Received: $message"
-    
     if {![dict exists $parsed method]} {
         debug_log "No method in message"
         return
     }
-    
     set method [dict get $parsed method]
     if {[dict exists $parsed params]} {
         set params [dict get $parsed params]
@@ -538,13 +535,12 @@ proc handle_message {message} {
     } else {
         set id ""
     }
-    
     switch $method {
         "initialize" {
-            handle_initialize $params $id
+            handle_initialize $params $id $sock
         }
         "shutdown" {
-            handle_shutdown $params $id
+            handle_shutdown $params $id $sock
         }
         "exit" {
             debug_log "Exit requested"
@@ -557,17 +553,17 @@ proc handle_message {message} {
             handle_did_change $params
         }
         "textDocument/documentSymbol" {
-            handle_document_symbol $params $id
+            handle_document_symbol $params $id $sock
         }
         "textDocument/references" {
-            handle_references $params $id
+            handle_references $params $id $sock
         }
         "textDocument/definition" {
-            handle_definition $params $id
+            handle_definition $params $id $sock
         }
         default {
             if {$id ne ""} {
-                send_error $id -32601 "Method not found: $method"
+                send_error $id -32601 "Method not found: $method" $sock
             }
             debug_log "Unknown method: $method"
         }
@@ -592,21 +588,19 @@ proc main {} {
     debug_log "TCL LSP Server exiting"
 }
 
-if {[info exists argv0] && $argv0 eq [info script] && $argc > 0} {
-    set filename [lindex $argv 0]
-    set f [open $filename r]
-    set content [read $f]
-    close $f
-    puts "Symbols:"
-    puts [parse_tcl_symbols $content]
-    exit 0
-}
-
 # Start the server
 if {[info exists argv0] && $argv0 eq [info script]} {
     if {$argc >= 2 && [lindex $argv 0] eq "--tcp"} {
         set port [lindex $argv 1]
         start_tcp_server $port
+    } elseif {$argc > 0 && ![string match "--*" [lindex $argv 0]]} {
+        set filename [lindex $argv 0]
+        set f [open $filename r]
+        set content [read $f]
+        close $f
+        puts "Symbols:"
+        puts [parse_tcl_symbols $content]
+        exit 0
     } else {
         main
     }
