@@ -593,6 +593,8 @@ if {[info exists argv0] && $argv0 eq [info script]} {
     if {$argc >= 2 && [lindex $argv 0] eq "--tcp"} {
         set port [lindex $argv 1]
         start_tcp_server $port
+    } elseif {$argc > 0 && [lindex $argv 0] eq "--stdio"} {
+        main
     } elseif {$argc > 0 && ![string match "--*" [lindex $argv 0]]} {
         set filename [lindex $argv 0]
         set f [open $filename r]
