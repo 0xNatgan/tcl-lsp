@@ -56,12 +56,18 @@ proc read_lsp_message {} {
 }
 
 # Send an LSP message to stdout
-proc send_lsp_message {content} {
+proc send_lsp_message {content {sock ""}} {
     set content_length [string length $content]
-    puts "Content-Length: $content_length\r"
-    puts "\r"
-    puts -nonewline $content
-    flush stdout
+    set msg "Content-Length: $content_length\r\n\r\n$content"
+    if {$sock eq ""} {
+        puts "Content-Length: $content_length\r"
+        puts "\r"
+        puts -nonewline $content
+        flush stdout
+    } else {
+        puts $sock $msg
+        flush $sock
+    }
 }
 
 # Convert Tcl dict to JSON recursively
@@ -466,6 +472,47 @@ proc handle_definition {params id} {
     debug_log "Definition found for '$word': [llength $result]"
 }
 
+# Helper: Start TCP server if requested
+proc start_tcp_server {port} {
+    socket -server accept_tcp_connection $port
+    puts "TCL LSP Server listening on port $port"
+    flush stdout
+    vwait forever
+}
+
+proc accept_tcp_connection {sock addr port} {
+    fconfigure $sock -translation binary -buffering line
+    fileevent $sock readable [list handle_tcp_message $sock]
+}
+
+proc handle_tcp_message {sock} {
+    # Read headers
+    set headers {}
+    while {1} {
+        if {[gets $sock line] == -1} {
+            close $sock
+            return
+        }
+        if {$line eq "\r" || $line eq ""} {
+            break
+        }
+        lappend headers $line
+    }
+    # Parse Content-Length
+    set content_length 0
+    foreach header $headers {
+        if {[regexp {^Content-Length:\s*(\d+)} $header -> length]} {
+            set content_length $length
+            break
+        }
+    }
+    if {$content_length == 0} {
+        return
+    }
+    set content [read $sock $content_length]
+    handle_message $content $sock
+}
+
 # Main message handler
 proc handle_message {message} {
     if {[catch {set parsed [json::json2dict $message]} error]} {
@@ -557,5 +604,10 @@ if {[info exists argv0] && $argv0 eq [info script] && $argc > 0} {
 
 # Start the server
 if {[info exists argv0] && $argv0 eq [info script]} {
-    main
+    if {$argc >= 2 && [lindex $argv 0] eq "--tcp"} {
+        set port [lindex $argv 1]
+        start_tcp_server $port
+    } else {
+        main
+    }
 }
