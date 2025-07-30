@@ -351,11 +351,12 @@ proc find_definition {content symbol_name} {
 
 # Handle initialize request
 proc handle_initialize {params id {sock ""}} {
-    set result [dict create capabilities [dict create \
+    set capabilities [dict create \
         textDocumentSync 1 \
         documentSymbolProvider true \
         referencesProvider true \
-        definitionProvider true]]
+        definitionProvider true]
+    set result [dict create capabilities $capabilities]
     send_response $id $result $sock
     debug_log "Initialized with capabilities"
 }
