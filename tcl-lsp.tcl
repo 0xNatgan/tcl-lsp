@@ -76,11 +76,9 @@ proc dict_to_json {dict_data} {
         # Not a dict, return as string
         return [json::write string $dict_data]
     }
-    
     set json_pairs {}
     dict for {key value} $dict_data {
         set json_key [json::write string $key]
-        
         # Check if value is a dict
         if {[catch {dict size $value} size] == 0 && $size > 0} {
             set json_value [dict_to_json $value]
@@ -97,31 +95,48 @@ proc dict_to_json {dict_data} {
             set json_value "\[[join $json_list ,]\]"
         } elseif {[string is integer $value]} {
             set json_value $value
+        } elseif {$value eq "true"} {
+            set json_value true
+        } elseif {$value eq "false"} {
+            set json_value false
         } else {
             set json_value [json::write string $value]
         }
-        
         lappend json_pairs "$json_key:$json_value"
     }
-    
     return "\{[join $json_pairs ,]\}"
 }
 
 # Send LSP response
 proc send_response {id result {sock ""}} {
-    # Handle different result types
-    if {[llength $result] == 0} {
-        # Empty result
-        set json_result "null"
-    } elseif {[llength $result] == 1 && [catch {dict size $result} size] == 0 && $size > 0} {
-        # Single dict
-        set json_result [dict_to_json $result]
-    } elseif {[llength $result] > 1} {
-        # List of items
+    # If result is a list of dicts, always serialize as array
+    set is_list_of_dicts 1
+    if {[llength $result] > 0} {
+        foreach item $result {
+            if {[catch {dict size $item} item_size] != 0 || $item_size == 0} {
+                set is_list_of_dicts 0
+                break
+            }
+        }
+    } else {
+        set is_list_of_dicts 0
+    }
+
+    if {$is_list_of_dicts} {
         set json_items {}
         foreach item $result {
-            if {[catch {dict size $item} item_size] == 0 && $item_size > 0} {
-                lappend json_items [dict_to_json $item]
+            lappend json_items [dict_to_json $item]
+        }
+        set json_result "\[[join $json_items ,]\]"
+    } elseif {[catch {dict size $result} size] == 0} {
+        set json_result [dict_to_json $result]
+    } elseif {[llength $result] == 0} {
+        set json_result "null"
+    } elseif {[llength $result] > 0} {
+        set json_items {}
+        foreach item $result {
+            if {[string is integer $item]} {
+                lappend json_items $item
             } else {
                 lappend json_items [json::write string $item]
             }
@@ -135,8 +150,8 @@ proc send_response {id result {sock ""}} {
             set json_result [json::write string $result]
         }
     }
-    
-    set response "\{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":$json_result\}"
+
+    set response [format "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":%s}" $id $json_result]
     send_lsp_message $response $sock
     debug_log "Sent response: $response"
 }
