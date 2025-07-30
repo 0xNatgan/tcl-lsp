@@ -79,8 +79,10 @@ proc dict_to_json {dict_data} {
     set json_pairs {}
     dict for {key value} $dict_data {
         set json_key [json::write string $key]
-        # Check if value is a dict
-        if {[catch {dict size $value} size] == 0 && $size > 0} {
+        # Handle empty list as [] (as a string, so it is inserted literally)
+        if {[llength $value] == 0} {
+            set json_value "[]"
+        } elseif {[catch {dict size $value} size] == 0 && $size > 0} {
             set json_value [dict_to_json $value]
         } elseif {[llength $value] > 1 && [catch {dict size [lindex $value 0]} size] == 0} {
             # It's a list of dicts
@@ -182,6 +184,7 @@ proc parse_tcl_symbols {content} {
             incr line_num
             continue
         }
+
 
         # Detect TclOO class definition
         if {[regexp {^\s*oo::class\s+create\s+([a-zA-Z_][a-zA-Z0-9_]*)} $line -> class_name]} {
